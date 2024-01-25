@@ -11,8 +11,6 @@ import CoreLocation
 
 class ViewController: UIViewController {
     
-    var viewModel = MapViewModel()
-    
     let mapView: MKMapView = {
         let mapView = MKMapView()
         mapView.translatesAutoresizingMaskIntoConstraints = false
@@ -42,12 +40,14 @@ class ViewController: UIViewController {
         return button
     }()
     
+    var annotaionArray = [MKPointAnnotation]()
+
     override func viewDidLoad() {
         super.viewDidLoad()
         setupViews()
         setConstraint()
         mapView.delegate = self
-        addAdressButton.addTarget(self, action: #selector(addAdressButtonTap), for: .touchUpInside)
+        addAdressButton.addTarget(self, action: #selector(addAdressbuttonTap), for: .touchUpInside)
         routeButton.addTarget(self, action: #selector(routeButtonTap), for: .touchUpInside)
         refreshButton.addTarget(self, action: #selector(refreshButtonTap), for: .touchUpInside)
 
@@ -62,42 +62,89 @@ class ViewController: UIViewController {
         mapView.addSubview(routeButton)
     }
     
-    @objc func addAdressButtonTap() {
-           alertAddAdress(title: "Добавить", placeholder: "Введите Адрес") { [unowned self] (text) in
-               viewModel.addAnnotation(forAddress: text) { result in
-                   switch result {
-                   case .success():
-                       self.mapView.addAnnotations(self.viewModel.annotations)
-                   case .failure(let error):
-                       self.allertError(title: "Oшибкa", message: error.localizedDescription)
-                       
-                   }
-               }
-           }
-       }
-    @objc func routeButtonTap() {
-        viewModel.createRoute { [unowned self] result in
-            switch result {
-            case .success(let responses):
-                responses.forEach { response in
-                    response.routes.forEach { route in
-                        self.mapView.addOverlay(route.polyline)
-                    }
-                }
-            case .failure(let error):
-                self.allertError(title: "Oшибкa", message: error.localizedDescription)
-            }
+    @objc func addAdressbuttonTap() {
+        alertAddAdress(title: "Добавить", placeholder: "Ввидите Адрес") { [self] (text) in
+            setupPlacemark(addresPlace: text)
         }
+    }
+    
+    @objc func routeButtonTap() {
+        
+        for index in 0...annotaionArray.count - 2 {
+            createDirectionRequst(startCoordinate: annotaionArray[index].coordinate, destinationCoodrinate: annotaionArray[index + 1].coordinate)
+        }
+        
+        mapView.showAnnotations(annotaionArray, animated: true)
         
     }
     
     @objc func refreshButtonTap() {
-        viewModel.clearAnnotations()
         mapView.removeOverlays(mapView.overlays)
         mapView.removeAnnotations(mapView.annotations)
+        annotaionArray = [MKPointAnnotation]()
         routeButton.isHidden = true
         refreshButton.isHidden = true
+    }
+    
+    private func setupPlacemark(addresPlace: String) {
+        let geoCoder = CLGeocoder()
+        geoCoder.geocodeAddressString(addresPlace) { [self] (placemarks, error) in
+            
+            if let error = error {
+                print(error)
+                allertError(title: "Error", message: "Not Found")
+                return
+            }
+            
+            guard let placemarks = placemarks else { return }
+            let placemark = placemarks.first
+            
+            let annotation = MKPointAnnotation()
+            annotation.title = "\(addresPlace)"
+            guard let placemarkLocation = placemark?.location else { return }
+            annotation.coordinate = placemarkLocation.coordinate
+            
+            annotaionArray.append(annotation)
+            
+            if annotaionArray.count > 2 {
+                routeButton.isHidden = false
+                refreshButton.isHidden = false
+            }
+            
+            mapView.showAnnotations(annotaionArray, animated: true)
+        }
+    }
+    
+    private func createDirectionRequst(startCoordinate: CLLocationCoordinate2D, destinationCoodrinate: CLLocationCoordinate2D){
         
+        let startLocation = MKPlacemark(coordinate: startCoordinate)
+        let destinationLocation = MKPlacemark(coordinate: destinationCoodrinate)
+        
+        let request = MKDirections.Request()
+        request.source = MKMapItem(placemark: startLocation)
+        request.destination = MKMapItem(placemark: destinationLocation)
+        request.transportType = .walking
+        request.requestsAlternateRoutes = true
+        
+        let direction = MKDirections(request: request)
+        direction.calculate { (response, error) in
+            if let error = error {
+                print(error)
+                return
+            }
+            
+            guard let  response = response else {
+                self.allertError(title: "Error", message: "Not Found")
+                return
+            }
+            
+            var minRoute = response.routes[0]
+            for route in response.routes {
+                minRoute = (route.distance < minRoute.distance) ? route : minRoute
+            }
+            
+            self.mapView.addOverlay(minRoute.polyline)
+        }
     }
 }
 
@@ -105,15 +152,9 @@ extension ViewController: MKMapViewDelegate {
     
     func mapView(_ mapView: MKMapView, rendererFor overlay: MKOverlay) -> MKOverlayRenderer {
         
-        if let polyline = overlay as? MKPolyline {
-            let renderer = MKPolylineRenderer(polyline: polyline)
-            renderer.lineWidth = 4.0
-            renderer.strokeColor = #colorLiteral(red: 0.1215686277, green: 0.01176470611, blue: 0.4235294163, alpha: 1)
-            return renderer
-        }
-        return MKOverlayRenderer(overlay: overlay)
-
-
+        let render = MKPolylineRenderer(overlay: overlay as! MKPolyline)
+        render.strokeColor = #colorLiteral(red: 0.1215686277, green: 0.01176470611, blue: 0.4235294163, alpha: 1)
+        return render
     }
 }
 
@@ -142,7 +183,6 @@ extension ViewController {
             refreshButton.heightAnchor.constraint(equalToConstant: 80),
             refreshButton.widthAnchor.constraint(equalToConstant: 80)
             
-        ])        
+        ])
     }
 }
-
